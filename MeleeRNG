@@ -4644,14 +4644,17 @@ end)
 -- Feature loops (same IIFE as UI — shares states / GEN)
 -- --------------------------------------------------------------------------
 
--- ── Auto Equip Best (WeaponsUI EquipBestBtn → Remotes.EquipBest:FireServer) ──
+-- ── Auto Equip Best ──
 addThread(task.spawn(function()
     while true do
         if GEN ~= _G.MeleeRNG_Gen then break end
-        task.wait(10)
+        task.wait(30)
         if not states.autoEquipBest then continue end
         pcall(function()
-            fireR("EquipBest")
+            invokeR("EquipBest")
+            if equipLabel and equipLabel.Parent then
+                equipLabel.Text = "⚔ Auto Equip: ON"
+            end
         end)
     end
 end))
