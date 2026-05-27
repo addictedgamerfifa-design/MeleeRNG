@@ -801,14 +801,14 @@ end)
 -- ============================================================
 -- TABS
 -- ============================================================
-local MoveTab = Window:CreateTab("Move", "person-running")
-local HacksTab = Window:CreateTab("Hacks", "shield")
-local AscendTab = Window:CreateTab("Ascension", "arrow-up-circle")
-local UpgTab = Window:CreateTab("Upgrades", "arrow-up")
-local SacTab = Window:CreateTab("Sacrifice", "flame")
-local ESPTab = Window:CreateTab("ESP", "eye")
-local AreaTab = Window:CreateTab("Areas", "map")
-local MiscTab = Window:CreateTab("Misc", "settings")
+local MoveTab = Window:CreateTab("Move", 4483362458)
+local HacksTab = Window:CreateTab("Hacks", 4483362458)
+local AscendTab = Window:CreateTab("Ascension", 4483362458)
+local UpgTab = Window:CreateTab("Upgrades", 4483362458)
+local SacTab = Window:CreateTab("Sacrifice", 4483362458)
+local ESPTab = Window:CreateTab("ESP", 4483362458)
+local AreaTab = Window:CreateTab("Areas", 4483362458)
+local MiscTab = Window:CreateTab("Misc", 4483362458)
 
 -- ============================================================
 -- MOVE TAB
