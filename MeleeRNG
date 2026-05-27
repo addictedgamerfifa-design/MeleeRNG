@@ -4425,18 +4425,57 @@ end)
 MoveTab:Toggle("💡 Full Bright", "Max ambient light, remove fog", states.fullBright, function(on)
     states.fullBright = on; saveSettings()
 end)
-local autoEquipBestToggle = MoveTab:Toggle("⚔️ Auto Equip Best", "Remotes.EquipBest:FireServer() every 10s while ON — same as the in-game Equip Best button (Weapons UI)", states.autoEquipBest, function(on)
+local equipGui = nil
+local equipLabel = nil
+
+local function createEquipHUD()
+    if equipGui then equipGui:Destroy() end
+    equipGui = Instance.new("ScreenGui", LP.PlayerGui)
+    equipGui.Name = "EquipHUD"
+    equipGui.ResetOnSpawn = false
+    local label = Instance.new("TextLabel", equipGui)
+    label.Size = UDim2.new(0, 200, 0, 30)
+    label.Position = UDim2.new(0, 10, 0, 10)
+    label.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    label.BackgroundTransparency = 0.4
+    label.TextColor3 = Color3.fromRGB(0, 255, 0)
+    label.TextSize = 14
+    label.Font = Enum.Font.GothamBold
+    label.Text = "⚔ Auto Equip: ON"
+    label.BorderSizePixel = 0
+    Instance.new("UICorner", label).CornerRadius = UDim.new(0, 6)
+    return label
+end
+
+local autoEquipBestToggle = MoveTab:Toggle("⚔️ Auto Equip Best", "Remotes.EquipBest:InvokeServer() every 30s while ON — shows HUD label", states.autoEquipBest, function(on)
     states.autoEquipBest = on == true
     saveSettings()
-    SLbl.Text = on and "Auto Equip Best ON (every 10s)" or "Auto Equip Best OFF"
+    if on then
+        equipLabel = createEquipHUD()
+        SLbl.Text = "Auto Equip Best ON"
+    else
+        if equipGui then equipGui:Destroy(); equipGui = nil; equipLabel = nil end
+        SLbl.Text = "Auto Equip Best OFF"
+    end
 end)
 task.defer(function()
     pcall(function()
         if autoEquipBestToggle and autoEquipBestToggle.Set then
             autoEquipBestToggle.Set(states.autoEquipBest)
         end
+        if states.autoEquipBest then
+            equipLabel = createEquipHUD()
+        end
     end)
 end)
+
+addConn(LP.CharacterAdded:Connect(function()
+    if GEN ~= _G.MeleeRNG_Gen then return end
+    if states.autoEquipBest then
+        task.wait(1)
+        equipLabel = createEquipHUD()
+    end
+end))
 
 MoveTab:Section("Actions")
 MoveTab:Button("📋", "Print Position", "Prints XYZ + current area to output", C.accent, function()
