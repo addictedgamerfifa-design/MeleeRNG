@@ -1220,6 +1220,155 @@ AscendTab:CreateButton({
 -- ============================================================
 -- UPGRADES TAB
 -- ============================================================
+local upgradeLevelCap = {}
+local upgradeStatusLabel = nil
+
+local function getUpgradeStatusText()
+    local sp = tonumber(getCachedStat("SP")) or 0
+    local lines = {"SP: " .. tostring(math.floor(sp)), ""}
+    for _, name in ipairs(UPGRADE_ORDER) do
+        if upgradeSelected[name] then
+            local lvl = invokeR("GetUpgradeLevel", name) or 0
+            local cap = upgradeLevelCap[name]
+            local atCap = cap and lvl >= cap
+            local priceFn = UPGRADE_PRICES[name]
+            local price = nil
+            if priceFn then
+                local ok, p = pcall(priceFn, lvl + 1)
+                if ok then price = math.floor(p) end
+            end
+            local capStr = cap and (" | cap: " .. tostring(cap)) or ""
+            if atCap then
+                lines[#lines + 1] = name .. ": Lv" .. tostring(lvl) .. " AT CAP" .. capStr
+            elseif price then
+                -- Estimate time based on SP gain rate
+                local etaStr = ""
+                if price > sp then
+                    lines[#lines + 1] = name .. ": Lv" .. tostring(lvl) .. " | next: " .. tostring(price) .. " SP" .. capStr
+                else
+                    lines[#lines + 1] = name .. ": Lv" .. tostring(lvl) .. " | READY (" .. tostring(price) .. " SP)" .. capStr
+                end
+            else
+                lines[#lines + 1] = name .. ": Lv" .. tostring(lvl) .. capStr
+            end
+        end
+    end
+    if #lines == 2 then
+        return "No upgrades selected"
+    end
+    return table.concat(lines, "\n")
+end
+
+-- Upgrade status HUD
+local upgradeHudGui = nil
+local upgradeHudLabel = nil
+local upgradeHudEnabled = false
+
+local function createUpgradeHUD()
+    if upgradeHudGui then upgradeHudGui:Destroy() end
+    upgradeHudGui = Instance.new("ScreenGui", LP.PlayerGui)
+    upgradeHudGui.Name = "UpgradeHUD"
+    upgradeHudGui.ResetOnSpawn = false
+    local frame = Instance.new("Frame", upgradeHudGui)
+    frame.Size = UDim2.new(0, 340, 0, 200)
+    frame.Position = UDim2.new(1, -350, 0, 50)
+    frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    frame.BackgroundTransparency = 0.4
+    frame.BorderSizePixel = 0
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
+    local label = Instance.new("TextLabel", frame)
+    label.Name = "UpgradeHudLabel"
+    label.Size = UDim2.new(1, -10, 1, -10)
+    label.Position = UDim2.new(0, 5, 0, 5)
+    label.BackgroundTransparency = 1
+    label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    label.TextSize = 11
+    label.Font = Enum.Font.GothamBold
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.TextYAlignment = Enum.TextYAlignment.Top
+    label.TextWrapped = true
+    label.Text = "Loading..."
+    return label
+end
+
+-- Upgrade status update loop
+task.spawn(function()
+    while true do
+        task.wait(3)
+        pcall(function()
+            local text = getUpgradeStatusText()
+            if upgradeStatusLabel and upgradeStatusLabel.Set then
+                pcall(function() upgradeStatusLabel.Set(text) end)
+            end
+            if upgradeHudEnabled and upgradeHudLabel and upgradeHudLabel.Parent then
+                upgradeHudLabel.Text = text
+            end
+        end)
+    end
+end)
+
+-- Auto upgrade loop with cap check
+task.spawn(function()
+    while true do
+        task.wait(1)
+        if not autoUpgradeOn then continue end
+        local sp = tonumber(getCachedStat("SP")) or 0
+        for _, name in ipairs(UPGRADE_ORDER) do
+            if upgradeSelected[name] then
+                local lvl = invokeR("GetUpgradeLevel", name) or 0
+                local cap = upgradeLevelCap[name]
+                if cap and lvl >= cap then continue end
+                local priceFn = UPGRADE_PRICES[name]
+                if priceFn then
+                    local ok, price = pcall(priceFn, lvl + 1)
+                    if ok and sp >= price then
+                        local result = invokeR("BuyUpgrade", name)
+                        if result then
+                            Rayfield:Notify({Title = "Upgraded!", Content = name .. " Lv" .. tostring(lvl+1), Duration = 3})
+                            break
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+UpgTab:CreateSection("Status")
+
+upgradeStatusLabel = UpgTab:CreateLabel("Loading upgrade status...")
+
+UpgTab:CreateToggle({
+    Name = "Show Upgrade HUD On Screen",
+    CurrentValue = false,
+    Flag = "UpgradeHUD",
+    Callback = function(on)
+        upgradeHudEnabled = on
+        if on then
+            upgradeHudLabel = createUpgradeHUD()
+        else
+            if upgradeHudGui then
+                upgradeHudGui:Destroy()
+                upgradeHudGui = nil
+                upgradeHudLabel = nil
+            end
+        end
+    end
+})
+
+UpgTab:CreateButton({
+    Name = "Refresh Status Now",
+    Callback = function()
+        pcall(function()
+            local text = getUpgradeStatusText()
+            if upgradeStatusLabel and upgradeStatusLabel.Set then
+                upgradeStatusLabel.Set(text)
+            end
+            Rayfield:Notify({Title = "Upgrades", Content = "Status refreshed", Duration = 2})
+        end)
+    end
+})
+
 UpgTab:CreateSection("Auto Upgrade")
 
 UpgTab:CreateToggle({
@@ -1231,7 +1380,7 @@ UpgTab:CreateToggle({
     end
 })
 
-UpgTab:CreateSection("Select Upgrades")
+UpgTab:CreateSection("Select Upgrades + Level Caps")
 
 for _, name in ipairs(UPGRADE_ORDER) do
     local n2 = name
@@ -1243,149 +1392,22 @@ for _, name in ipairs(UPGRADE_ORDER) do
             upgradeSelected[n2] = on
         end
     })
+    UpgTab:CreateInput({
+        Name = n2 .. " level cap",
+        PlaceholderText = "No cap",
+        RemoveTextAfterFocusLost = true,
+        Callback = function(text)
+            local n = tonumber(text)
+            if n and n >= 1 then
+                upgradeLevelCap[n2] = math.floor(n)
+                Rayfield:Notify({Title = "Cap Set", Content = n2 .. " capped at Lv" .. tostring(math.floor(n)), Duration = 3})
+            else
+                upgradeLevelCap[n2] = nil
+                Rayfield:Notify({Title = "Cap Removed", Content = n2 .. " has no cap", Duration = 3})
+            end
+        end
+    })
 end
-
--- ============================================================
--- SACRIFICE TAB
--- ============================================================
-SacTab:CreateSection("Inventory")
-
-SacTab:CreateButton({
-    Name = "Refresh Inventory",
-    Callback = function()
-        refreshSacInventory()
-    end
-})
-
-SacTab:CreateSection("Fountain Sacrifice")
-
-SacTab:CreateToggle({
-    Name = "Auto Sacrifice",
-    CurrentValue = false,
-    Flag = "AutoSacrifice",
-    Callback = function(on)
-        sacStates.autoSacrifice = on
-    end
-})
-
-SacTab:CreateToggle({
-    Name = "Filter by Color (OneIn)",
-    CurrentValue = false,
-    Flag = "SacFilterColor",
-    Callback = function(on)
-        sacStates.sacFilterColor = on
-    end
-})
-
-SacTab:CreateToggle({
-    Name = "Filter by Name",
-    CurrentValue = false,
-    Flag = "SacFilterName",
-    Callback = function(on)
-        sacStates.sacFilterName = on
-    end
-})
-
-SacTab:CreateDropdown({
-    Name = "Sacrifice up through color",
-    Options = SAC_DROPDOWN_LABELS,
-    CurrentOption = SAC_DROPDOWN_LABELS[1],
-    Flag = "SacRarity",
-    Callback = function(option)
-        for i, label in ipairs(SAC_DROPDOWN_LABELS) do
-            if label == option then
-                sacStates.sacRarityCapIdx = i
-                break
-            end
-        end
-    end
-})
-
-SacTab:CreateSlider({
-    Name = "Always Keep Qty",
-    Range = {0, 999},
-    Increment = 1,
-    Suffix = "keep",
-    CurrentValue = 0,
-    Flag = "SacKeepQty",
-    Callback = function(v)
-        sacStates.sacKeepQty = v
-    end
-})
-
-SacTab:CreateSection("Totem of Fortune")
-
-SacTab:CreateToggle({
-    Name = "Auto Totem",
-    CurrentValue = false,
-    Flag = "AutoTotem",
-    Callback = function(on)
-        sacStates.autoTotem = on
-    end
-})
-
-SacTab:CreateToggle({
-    Name = "Totem: Filter by Color",
-    CurrentValue = false,
-    Flag = "TotemFilterColor",
-    Callback = function(on)
-        sacStates.totemFilterColor = on
-    end
-})
-
-SacTab:CreateDropdown({
-    Name = "Totem color tier",
-    Options = SAC_DROPDOWN_LABELS,
-    CurrentOption = SAC_DROPDOWN_LABELS[1],
-    Flag = "TotemRarity",
-    Callback = function(option)
-        for i, label in ipairs(SAC_DROPDOWN_LABELS) do
-            if label == option then
-                sacStates.totemRarityCapIdx = i
-                break
-            end
-        end
-    end
-})
-
-SacTab:CreateSlider({
-    Name = "Totem Keep Qty",
-    Range = {0, 999},
-    Increment = 1,
-    Suffix = "keep",
-    CurrentValue = 0,
-    Flag = "TotemKeepQty",
-    Callback = function(v)
-        sacStates.totemKeepQty = v
-    end
-})
-
-SacTab:CreateButton({
-    Name = "Totem: Sacrifice 1",
-    Callback = function()
-        local ok, why = totemExecuteNext()
-        if ok then
-            Rayfield:Notify({Title = "Totem", Content = "Sacrificed: " .. tostring(why), Duration = 3})
-        else
-            Rayfield:Notify({Title = "Totem", Content = "Failed: " .. tostring(why), Duration = 3})
-        end
-    end
-})
-
-SacTab:CreateButton({
-    Name = "Totem Status",
-    Callback = function()
-        local onCd, remain = totemInCooldown()
-        local maxC = getTotemMaxPerCycle()
-        local done = sacStates.totemDoneThisCycle
-        local cdStr = onCd and string.format("%dm%ds", math.floor(remain/60), remain%60) or "ready"
-        Rayfield:Notify({
-            Title = "Totem Status",
-            Content = string.format("%d/%d done | CD: %s | this run: %d", done, maxC, cdStr, _totemActionsThisRun),
-            Duration = 5
-        })
-    end
-})
 
 -- ============================================================
 -- ESP TAB
