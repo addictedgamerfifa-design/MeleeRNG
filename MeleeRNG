@@ -1432,61 +1432,84 @@ ESPTab:CreateButton({
 -- ============================================================
 -- AREAS TAB
 -- ============================================================
-AreaTab:CreateSection("Teleport to Area")
+local function buildAreaButtons()
+    -- Clear existing tab content by rebuilding
+    AreaTab:CreateSection("Areas")
 
-AreaTab:CreateButton({
-    Name = "List Areas",
-    Callback = function()
-        local areasFolder = workspace:FindFirstChild("Areas")
-        if not areasFolder then
-            Rayfield:Notify({Title = "Error", Content = "No Areas folder found", Duration = 3})
-            return
-        end
+    local areasFolder = workspace:FindFirstChild("Areas")
+    if areasFolder then
         local areas = areasFolder:GetChildren()
         table.sort(areas, function(a, b)
             local ak = tonumber(a:GetAttribute("MinimumKills")) or 0
             local bk = tonumber(b:GetAttribute("MinimumKills")) or 0
             return ak < bk
         end)
+
+        local kills = tonumber(getCachedStat("Kills")) or 0
+        local unlocked = 0
+
         for _, area in ipairs(areas) do
+            local areaRef = area
             local minKills = tonumber(area:GetAttribute("MinimumKills")) or 0
-            print("[MeleeRNG] Area:", area.Name, "| Min Kills:", minKills)
+            local areaName = area.Name
+            local meetsReq = kills >= minKills
+            if meetsReq then unlocked = unlocked + 1 end
+
+            local buttonName = meetsReq
+                and "✅ " .. areaName .. " (" .. tostring(minKills) .. " kills)"
+                or "⬜ " .. areaName .. " (" .. tostring(minKills) .. " kills)"
+
+            AreaTab:CreateButton({
+                Name = buttonName,
+                Callback = function()
+                    local root = getRoot()
+                    if not root then
+                        Rayfield:Notify({Title = "Error", Content = "No character found", Duration = 3})
+                        return
+                    end
+                    local sp = areaRef:FindFirstChild("SpawnPoint")
+                    if sp then
+                        root.CFrame = sp.CFrame + Vector3.new(0, 5, 0)
+                    else
+                        local bb = areaRef:FindFirstChildOfClass("BasePart")
+                        if bb then
+                            root.CFrame = CFrame.new(bb.Position + Vector3.new(0, 5, 0))
+                        end
+                    end
+                    Rayfield:Notify({
+                        Title = "Teleported",
+                        Content = "Went to " .. areaName .. " | Req: " .. tostring(minKills) .. " kills",
+                        Duration = 3
+                    })
+                end
+            })
         end
-        Rayfield:Notify({Title = "Areas", Content = #areas .. " areas listed in output", Duration = 3})
+
+        Rayfield:Notify({
+            Title = "Areas Refreshed",
+            Content = string.format("%d/%d unlocked | Kills: %s", unlocked, #areas, tostring(math.floor(kills))),
+            Duration = 4
+        })
+    else
+        AreaTab:CreateButton({
+            Name = "No areas found — try rejoining",
+            Callback = function() end
+        })
+    end
+end
+
+-- Refresh button at top
+AreaTab:CreateSection("Controls")
+
+AreaTab:CreateButton({
+    Name = "Refresh Areas",
+    Callback = function()
+        buildAreaButtons()
     end
 })
 
-AreaTab:CreateInput({
-    Name = "Teleport to Area",
-    PlaceholderText = "Enter area name...",
-    RemoveTextAfterFocusLost = false,
-    Callback = function(text)
-        local areasFolder = workspace:FindFirstChild("Areas")
-        if not areasFolder then return end
-        local area = areasFolder:FindFirstChild(text)
-        if not area then
-            local tl = text:lower()
-            for _, a in ipairs(areasFolder:GetChildren()) do
-                if a.Name:lower():find(tl, 1, true) then area = a; break end
-            end
-        end
-        if area then
-            local root = getRoot()
-            if root then
-                local sp = area:FindFirstChild("SpawnPoint")
-                if sp then
-                    root.CFrame = sp.CFrame + Vector3.new(0, 5, 0)
-                else
-                    local bb = area:FindFirstChildOfClass("BasePart")
-                    if bb then root.CFrame = CFrame.new(bb.Position + Vector3.new(0, 5, 0)) end
-                end
-                Rayfield:Notify({Title = "Teleported", Content = "Went to " .. area.Name, Duration = 3})
-            end
-        else
-            Rayfield:Notify({Title = "Error", Content = "Area not found: " .. text, Duration = 3})
-        end
-    end
-})
+-- Build on load
+buildAreaButtons()
 
 AreaTab:CreateSection("Position")
 
