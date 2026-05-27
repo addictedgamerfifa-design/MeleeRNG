@@ -1,7 +1,3 @@
--- ============================================================
--- MELEE RNG SCRIPT - Full Version
--- ============================================================
-
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
@@ -20,7 +16,6 @@ local Window = Rayfield:CreateWindow({
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
 local RS = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 local Lighting = game:GetService("Lighting")
@@ -78,15 +73,27 @@ local states = {
     hitboxPulse = false,
     hitboxDutyCycle = 2,
     autoEquipBest = false,
+    hideMobs = false,
+    autoRaid = false,
+    autoReExec = false,
 }
 
 local walkSpeedVal = 16
 local hitboxSize = 500
-local flyBV, flyBG
 local selectedAura = "Demonic"
 local autoAscendOn = false
 local autoSelectAura = false
-local ascendLiveTracking = false
+local autoManaToSP = false
+local equipEnabled = false
+local equipGui = nil
+local equipLabel = nil
+local hudGui = nil
+local hudLabel = nil
+local hudEnabled = false
+local statsLabel = nil
+local savedPosition = nil
+local autoUpgradeOn = false
+local upgradeSelected = {}
 
 -- Hitbox vars
 local HITBOX_BIG_DEFAULT = 500
@@ -100,6 +107,9 @@ local _hitboxCache = {}
 local _hitboxCacheDirty = true
 local _pulseBigVec = Vector3.new(hitboxSize, hitboxSize, hitboxSize)
 local HITBOX_DUTY_MAX = 12
+
+-- Hidden mob tracking
+local _hiddenMobs = {}
 
 local function getPlayerWeaponFolder()
     return workspace:FindFirstChild(LP.Name)
@@ -178,6 +188,45 @@ task.spawn(function()
     end
 end)
 
+-- Hide/show mobs
+local function hideMobs()
+    local mobsFolder = workspace:FindFirstChild("Mobs")
+    if not mobsFolder then return end
+    for _, model in ipairs(mobsFolder:GetChildren()) do
+        if model:IsA("Model") then
+            for _, part in ipairs(model:GetDescendants()) do
+                if part:IsA("BasePart") or part:IsA("Decal") then
+                    if not _hiddenMobs[part] then
+                        _hiddenMobs[part] = part.Transparency
+                    end
+                    part.Transparency = 1
+                end
+            end
+        end
+    end
+end
+
+local function showMobs()
+    for part, origTrans in pairs(_hiddenMobs) do
+        pcall(function()
+            if part and part.Parent then
+                part.Transparency = origTrans
+            end
+        end)
+    end
+    _hiddenMobs = {}
+end
+
+-- Hide mobs watcher
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        if states.hideMobs then
+            hideMobs()
+        end
+    end
+end)
+
 -- Noclip + god mode loop
 RunService.Stepped:Connect(function()
     local char = getChar()
@@ -219,10 +268,14 @@ RunService.RenderStepped:Connect(function()
     hrp.CFrame = hrp.CFrame + dir * 50 * 0.016
 end)
 
--- Character respawn handler
+-- Character respawn
 LP.CharacterAdded:Connect(function()
     states.fly = false
     states.noclip = false
+    if equipEnabled then
+        task.wait(1)
+        equipLabel = createEquipHUD()
+    end
 end)
 
 -- ============================================================
@@ -233,9 +286,6 @@ local UPGRADE_ORDER = {
     "Mana Multiplier", "Spin Speed", "RNG Luck", "Kill Multiplier",
     "Skill Point Multiplier", "Boss Spawn Chance",
 }
-
-local upgradeSelected = {}
-local autoUpgradeOn = false
 
 local UPGRADE_PRICES = {
     ["Weapons Equipped"]       = function(p) return 1 + p^2 * p end,
@@ -250,7 +300,6 @@ local UPGRADE_PRICES = {
     ["Boss Spawn Chance"]      = function(p) return math.round(p^4) + 150 end,
 }
 
--- Auto upgrade loop
 task.spawn(function()
     while true do
         task.wait(1)
@@ -292,7 +341,7 @@ local SAC_TIERS = {
 
 local SAC_DROPDOWN_LABELS = {}
 for i, t in ipairs(SAC_TIERS) do
-    SAC_DROPDOWN_LABELS[i] = string.format("%s %s (OneIn ≤ %s)", t.emoji, t.name, tostring(t.maxOneIn))
+    SAC_DROPDOWN_LABELS[i] = string.format("%s %s (OneIn <= %s)", t.emoji, t.name, tostring(t.maxOneIn))
 end
 
 local _sacInv = {}
@@ -355,20 +404,6 @@ local function sacLookupAsset(weaponName)
     return asset
 end
 
-local function sacTierFromOneIn(oneIn)
-    local o = tonumber(oneIn)
-    if not o then return "?", nil end
-    for _, t in ipairs(SAC_TIERS) do
-        if o <= t.maxOneIn then return t.emoji .. " " .. t.name, t end
-    end
-    return "✴ Above Omni", nil
-end
-
-local function sacCapOneInForIdx(idx)
-    local t = SAC_TIERS[math.clamp(math.floor(tonumber(idx) or 1), 1, #SAC_TIERS)]
-    return t and t.maxOneIn or 5
-end
-
 local function normSacWeapon(e)
     if type(e) ~= "table" then return nil end
     local name = e.Name or e.name or e.WepName or e.WeaponName or e.Weapon
@@ -419,6 +454,11 @@ end
 
 local function sacAnyFilterOn()
     return sacStates.sacFilterColor or sacStates.sacFilterName
+end
+
+local function sacCapOneInForIdx(idx)
+    local t = SAC_TIERS[math.clamp(math.floor(tonumber(idx) or 1), 1, #SAC_TIERS)]
+    return t and t.maxOneIn or 5
 end
 
 local function sacWeaponPasses(w)
@@ -618,7 +658,6 @@ task.spawn(function()
 end)
 
 -- Auto mana to SP loop
-local autoManaToSP = false
 task.spawn(function()
     while true do
         task.wait(0.1)
@@ -630,11 +669,29 @@ task.spawn(function()
     end
 end)
 
--- Auto equip loop
-local equipEnabled = false
-local equipGui = nil
-local equipLabel = nil
+-- Auto raid loop
+task.spawn(function()
+    while true do
+        task.wait(5)
+        if not states.autoRaid then continue end
+        pcall(function()
+            fireR("EnableAutoRaid", true)
+        end)
+    end
+end)
 
+-- Auto re-exec loop
+task.spawn(function()
+    while true do
+        task.wait(60)
+        if not states.autoReExec then continue end
+        pcall(function()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/addictedgamerfifa-design/MeleeRNG/main/MeleeRNG"))()
+        end)
+    end
+end)
+
+-- Equip HUD
 local function createEquipHUD()
     local player = game.Players.LocalPlayer
     if equipGui then equipGui:Destroy() end
@@ -655,6 +712,7 @@ local function createEquipHUD()
     return label
 end
 
+-- Auto equip loop
 task.spawn(function()
     while true do
         task.wait(30)
@@ -667,12 +725,34 @@ task.spawn(function()
     end
 end)
 
-LP.CharacterAdded:Connect(function()
-    if equipEnabled then
-        task.wait(1)
-        equipLabel = createEquipHUD()
-    end
-end)
+-- HUD
+local function createHUD()
+    local player = game.Players.LocalPlayer
+    if hudGui then hudGui:Destroy() end
+    hudGui = Instance.new("ScreenGui", player.PlayerGui)
+    hudGui.Name = "MeleeRNGHud"
+    hudGui.ResetOnSpawn = false
+    local frame = Instance.new("Frame", hudGui)
+    frame.Size = UDim2.new(0, 320, 0, 110)
+    frame.Position = UDim2.new(0, 10, 0, 50)
+    frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    frame.BackgroundTransparency = 0.4
+    frame.BorderSizePixel = 0
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
+    local label = Instance.new("TextLabel", frame)
+    label.Name = "HudLabel"
+    label.Size = UDim2.new(1, -10, 1, -10)
+    label.Position = UDim2.new(0, 5, 0, 5)
+    label.BackgroundTransparency = 1
+    label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    label.TextSize = 12
+    label.Font = Enum.Font.GothamBold
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.TextYAlignment = Enum.TextYAlignment.Top
+    label.TextWrapped = true
+    label.Text = "Loading..."
+    return label
+end
 
 -- ESP
 local espBillboards = {}
@@ -714,40 +794,6 @@ local function updateESP()
     end
 end
 
--- HUD
-local hudGui = nil
-local hudLabel = nil
-local hudEnabled = false
-local statsLabel = nil
-
-local function createHUD()
-    local player = game.Players.LocalPlayer
-    if hudGui then hudGui:Destroy() end
-    hudGui = Instance.new("ScreenGui", player.PlayerGui)
-    hudGui.Name = "MeleeRNGHud"
-    hudGui.ResetOnSpawn = false
-    local frame = Instance.new("Frame", hudGui)
-    frame.Size = UDim2.new(0, 320, 0, 110)
-    frame.Position = UDim2.new(0, 10, 0, 50)
-    frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    frame.BackgroundTransparency = 0.4
-    frame.BorderSizePixel = 0
-    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
-    local label = Instance.new("TextLabel", frame)
-    label.Name = "HudLabel"
-    label.Size = UDim2.new(1, -10, 1, -10)
-    label.Position = UDim2.new(0, 5, 0, 5)
-    label.BackgroundTransparency = 1
-    label.TextColor3 = Color3.fromRGB(255, 255, 255)
-    label.TextSize = 12
-    label.Font = Enum.Font.GothamBold
-    label.TextXAlignment = Enum.TextXAlignment.Left
-    label.TextYAlignment = Enum.TextYAlignment.Top
-    label.TextWrapped = true
-    label.Text = "Loading..."
-    return label
-end
-
 -- Stats update loop
 task.spawn(function()
     local lastKills = 0
@@ -783,7 +829,7 @@ task.spawn(function()
             end)
             local line1 = string.format("Kills: %s | Mana: %s | SP: %s | Ascends: %d",
                 tostring(math.floor(kills)), tostring(math.floor(mana)), tostring(math.floor(sp)), ascends)
-            local line2 = string.format("KPM: %.1f | ETA → %s: %s", kpm, areaName, etaStr)
+            local line2 = string.format("KPM: %.1f | ETA -> %s: %s", kpm, areaName, etaStr)
             local line3 = string.format("Ascend: %s / %s (%s more)",
                 tostring(math.floor(kills)), tostring(required), tostring(remaining))
             local line4 = string.format("Aura: %s", selectedAura or "none")
@@ -816,7 +862,7 @@ local MiscTab = Window:CreateTab("Misc", 4483362458)
 MoveTab:CreateSection("Hitbox Pulse")
 
 MoveTab:CreateToggle({
-    Name = "⚡ Hitbox Pulse",
+    Name = "Hitbox Pulse",
     CurrentValue = false,
     Flag = "HitboxPulse",
     Callback = function(on)
@@ -839,7 +885,7 @@ MoveTab:CreateSlider({
 })
 
 MoveTab:CreateSlider({
-    Name = "Duty Cycle (1 big / N)",
+    Name = "Duty Cycle",
     Range = {2, 12},
     Increment = 1,
     CurrentValue = 2,
@@ -850,32 +896,32 @@ MoveTab:CreateSlider({
 })
 
 MoveTab:CreateButton({
-    Name = "⚡ Max Farm Preset",
+    Name = "Max Farm Preset (duty 2, 500)",
     Callback = function()
         hitboxSize = HITBOX_BIG_DEFAULT
         states.hitboxDutyCycle = 2
         _pulseBigVec = Vector3.new(HITBOX_BIG_DEFAULT, HITBOX_BIG_DEFAULT, HITBOX_BIG_DEFAULT)
-        Rayfield:Notify({Title = "Preset", Content = "Max Farm: duty 2, 500 studs", Duration = 3})
+        Rayfield:Notify({Title = "Preset", Content = "Max Farm applied", Duration = 3})
     end
 })
 
 MoveTab:CreateButton({
-    Name = "⚖️ Balanced Preset",
+    Name = "Balanced Preset (duty 5, 500)",
     Callback = function()
         hitboxSize = HITBOX_BIG_DEFAULT
         states.hitboxDutyCycle = 5
         _pulseBigVec = Vector3.new(HITBOX_BIG_DEFAULT, HITBOX_BIG_DEFAULT, HITBOX_BIG_DEFAULT)
-        Rayfield:Notify({Title = "Preset", Content = "Balanced: duty 5, 500 studs", Duration = 3})
+        Rayfield:Notify({Title = "Preset", Content = "Balanced applied", Duration = 3})
     end
 })
 
 MoveTab:CreateButton({
-    Name = "🐢 Low Lag Preset",
+    Name = "Low Lag Preset (duty 10, 350)",
     Callback = function()
         hitboxSize = HITBOX_BIG_LIGHT
         states.hitboxDutyCycle = 10
         _pulseBigVec = Vector3.new(HITBOX_BIG_LIGHT, HITBOX_BIG_LIGHT, HITBOX_BIG_LIGHT)
-        Rayfield:Notify({Title = "Preset", Content = "Low Lag: duty 10, 350 studs", Duration = 3})
+        Rayfield:Notify({Title = "Preset", Content = "Low Lag applied", Duration = 3})
     end
 })
 
@@ -895,13 +941,78 @@ MoveTab:CreateSlider({
     end
 })
 
+MoveTab:CreateSection("Anti Lag")
+
+MoveTab:CreateToggle({
+    Name = "Hide Mobs",
+    CurrentValue = false,
+    Flag = "HideMobs",
+    Callback = function(on)
+        states.hideMobs = on
+        if not on then showMobs() end
+    end
+})
+
+MoveTab:CreateButton({
+    Name = "Clear Unused Parts",
+    Callback = function()
+        local count = 0
+        local mobsFolder = workspace:FindFirstChild("Mobs")
+        if mobsFolder then
+            for _, model in ipairs(mobsFolder:GetChildren()) do
+                if model:IsA("Model") then
+                    for _, desc in ipairs(model:GetDescendants()) do
+                        if desc:IsA("ParticleEmitter") or desc:IsA("Trail") or desc:IsA("Beam") then
+                            desc.Enabled = false
+                            count = count + 1
+                        end
+                    end
+                end
+            end
+        end
+        Rayfield:Notify({Title = "Anti Lag", Content = "Disabled " .. count .. " effects", Duration = 3})
+    end
+})
+
+MoveTab:CreateButton({
+    Name = "Remove Shadows",
+    Callback = function()
+        Lighting.GlobalShadows = false
+        Lighting.FogEnd = 1e6
+        Lighting.FogStart = 1e6
+        Rayfield:Notify({Title = "Anti Lag", Content = "Shadows and fog removed", Duration = 3})
+    end
+})
+
+MoveTab:CreateButton({
+    Name = "Low Graphics Mode",
+    Callback = function()
+        settings().Rendering.QualityLevel = 1
+        Lighting.GlobalShadows = false
+        local mobsFolder = workspace:FindFirstChild("Mobs")
+        if mobsFolder then
+            for _, model in ipairs(mobsFolder:GetChildren()) do
+                for _, desc in ipairs(model:GetDescendants()) do
+                    if desc:IsA("ParticleEmitter") or desc:IsA("Trail") or desc:IsA("Beam") or desc:IsA("SelectionBox") then
+                        desc.Enabled = false
+                    end
+                    if desc:IsA("Decal") or desc:IsA("Texture") then
+                        desc.Transparency = 1
+                    end
+                end
+            end
+        end
+        Rayfield:Notify({Title = "Anti Lag", Content = "Low graphics mode enabled", Duration = 3})
+    end
+})
+
 -- ============================================================
 -- HACKS TAB
 -- ============================================================
 HacksTab:CreateSection("Movement")
 
 HacksTab:CreateToggle({
-    Name = "🦅 Fly",
+    Name = "Fly",
     CurrentValue = false,
     Flag = "Fly",
     Callback = function(on)
@@ -912,7 +1023,7 @@ HacksTab:CreateToggle({
 })
 
 HacksTab:CreateToggle({
-    Name = "👻 Noclip",
+    Name = "Noclip",
     CurrentValue = false,
     Flag = "Noclip",
     Callback = function(on)
@@ -929,7 +1040,7 @@ HacksTab:CreateToggle({
 })
 
 HacksTab:CreateToggle({
-    Name = "🚀 Infinite Jump",
+    Name = "Infinite Jump",
     CurrentValue = false,
     Flag = "InfJump",
     Callback = function(on)
@@ -938,7 +1049,7 @@ HacksTab:CreateToggle({
 })
 
 HacksTab:CreateToggle({
-    Name = "🛡️ God Mode",
+    Name = "God Mode",
     CurrentValue = false,
     Flag = "GodMode",
     Callback = function(on)
@@ -949,7 +1060,7 @@ HacksTab:CreateToggle({
 HacksTab:CreateSection("Actions")
 
 HacksTab:CreateButton({
-    Name = "🔄 Respawn",
+    Name = "Respawn",
     Callback = function()
         local h = getHuman()
         if h then h.Health = 0 end
@@ -957,7 +1068,7 @@ HacksTab:CreateButton({
 })
 
 HacksTab:CreateButton({
-    Name = "📋 Print Position",
+    Name = "Print Position",
     Callback = function()
         local r = getRoot()
         if not r then return end
@@ -975,7 +1086,7 @@ AscendTab:CreateSection("Ascend Progress")
 statsLabel = AscendTab:CreateLabel("Loading stats...")
 
 AscendTab:CreateButton({
-    Name = "📊 Refresh Ascend Progress",
+    Name = "Refresh Ascend Progress",
     Callback = function()
         pcall(function()
             local kills = tonumber(getCachedStat("Kills")) or 0
@@ -997,7 +1108,7 @@ AscendTab:CreateButton({
 })
 
 AscendTab:CreateToggle({
-    Name = "📺 Show HUD On Screen",
+    Name = "Show HUD On Screen",
     CurrentValue = false,
     Flag = "AscendHUD",
     Callback = function(on)
@@ -1017,7 +1128,7 @@ AscendTab:CreateToggle({
 AscendTab:CreateSection("Auto Ascend")
 
 AscendTab:CreateToggle({
-    Name = "⬆️ Auto Ascend",
+    Name = "Auto Ascend",
     CurrentValue = false,
     Flag = "AutoAscend",
     Callback = function(on)
@@ -1026,14 +1137,14 @@ AscendTab:CreateToggle({
 })
 
 AscendTab:CreateButton({
-    Name = "⬆️ Ascend Now",
+    Name = "Ascend Now",
     Callback = function()
         pcall(function()
             local result = invokeR("ConfirmAscend")
             if result then
                 Rayfield:Notify({Title = "Ascended!", Content = "Successfully ascended", Duration = 3})
             else
-                Rayfield:Notify({Title = "Failed", Content = "Could not ascend — check kill count", Duration = 3})
+                Rayfield:Notify({Title = "Failed", Content = "Could not ascend", Duration = 3})
             end
         end)
     end
@@ -1042,7 +1153,7 @@ AscendTab:CreateButton({
 AscendTab:CreateSection("Ascend Points")
 
 AscendTab:CreateButton({
-    Name = "📊 Check AP",
+    Name = "Check AP",
     Callback = function()
         pcall(function()
             local ap = invokeR("GetAscendPoints")
@@ -1054,7 +1165,7 @@ AscendTab:CreateButton({
 AscendTab:CreateSection("Ascend Upgrades")
 
 AscendTab:CreateButton({
-    Name = "📋 List Ascend Upgrades",
+    Name = "List Ascend Upgrades",
     Callback = function()
         pcall(function()
             local upgrades = invokeR("GetAscendUpgrades")
@@ -1062,9 +1173,9 @@ AscendTab:CreateButton({
                 for k, v in pairs(upgrades) do
                     print("[MeleeRNG/Ascend]", k, "=", v)
                 end
-                Rayfield:Notify({Title = "Ascend Upgrades", Content = "Check output for full list", Duration = 3})
+                Rayfield:Notify({Title = "Ascend Upgrades", Content = "Check output", Duration = 3})
             else
-                Rayfield:Notify({Title = "Error", Content = "Could not fetch ascend upgrades", Duration = 3})
+                Rayfield:Notify({Title = "Error", Content = "Could not fetch", Duration = 3})
             end
         end)
     end
@@ -1097,7 +1208,7 @@ AscendTab:CreateToggle({
 })
 
 AscendTab:CreateButton({
-    Name = "🌟 Select Aura Now",
+    Name = "Select Aura Now",
     Callback = function()
         pcall(function()
             fireR("SelectAura", selectedAura)
@@ -1112,7 +1223,7 @@ AscendTab:CreateButton({
 UpgTab:CreateSection("Auto Upgrade")
 
 UpgTab:CreateToggle({
-    Name = "⚡ Auto Upgrade",
+    Name = "Auto Upgrade",
     CurrentValue = false,
     Flag = "AutoUpgrade",
     Callback = function(on)
@@ -1140,7 +1251,7 @@ end
 SacTab:CreateSection("Inventory")
 
 SacTab:CreateButton({
-    Name = "🔄 Refresh Inventory",
+    Name = "Refresh Inventory",
     Callback = function()
         refreshSacInventory()
     end
@@ -1250,7 +1361,7 @@ SacTab:CreateSlider({
 })
 
 SacTab:CreateButton({
-    Name = "🕯️ Totem: Sacrifice 1",
+    Name = "Totem: Sacrifice 1",
     Callback = function()
         local ok, why = totemExecuteNext()
         if ok then
@@ -1262,7 +1373,7 @@ SacTab:CreateButton({
 })
 
 SacTab:CreateButton({
-    Name = "📊 Totem Status",
+    Name = "Totem Status",
     Callback = function()
         local onCd, remain = totemInCooldown()
         local maxC = getTotemMaxPerCycle()
@@ -1282,7 +1393,7 @@ SacTab:CreateButton({
 ESPTab:CreateSection("Mob ESP")
 
 ESPTab:CreateToggle({
-    Name = "👹 Mob ESP",
+    Name = "Mob ESP",
     CurrentValue = false,
     Flag = "MobESP",
     Callback = function(on)
@@ -1310,7 +1421,7 @@ ESPTab:CreateToggle({
 })
 
 ESPTab:CreateButton({
-    Name = "🔄 Refresh ESP",
+    Name = "Refresh ESP",
     Callback = function()
         clearESP()
         updateESP()
@@ -1324,7 +1435,7 @@ ESPTab:CreateButton({
 AreaTab:CreateSection("Teleport to Area")
 
 AreaTab:CreateButton({
-    Name = "🔄 List Areas",
+    Name = "List Areas",
     Callback = function()
         local areasFolder = workspace:FindFirstChild("Areas")
         if not areasFolder then
@@ -1341,7 +1452,7 @@ AreaTab:CreateButton({
             local minKills = tonumber(area:GetAttribute("MinimumKills")) or 0
             print("[MeleeRNG] Area:", area.Name, "| Min Kills:", minKills)
         end
-        Rayfield:Notify({Title = "Areas", Content = #areas .. " areas — check output", Duration = 3})
+        Rayfield:Notify({Title = "Areas", Content = #areas .. " areas listed in output", Duration = 3})
     end
 })
 
@@ -1377,12 +1488,10 @@ AreaTab:CreateInput({
     end
 })
 
-local savedPosition = nil
-
 AreaTab:CreateSection("Position")
 
 AreaTab:CreateButton({
-    Name = "📍 Save Current Position",
+    Name = "Save Current Position",
     Callback = function()
         local root = getRoot()
         if root then
@@ -1394,7 +1503,7 @@ AreaTab:CreateButton({
 })
 
 AreaTab:CreateButton({
-    Name = "🔙 Return to Saved Position",
+    Name = "Return to Saved Position",
     Callback = function()
         if savedPosition then
             local root = getRoot()
@@ -1414,7 +1523,7 @@ AreaTab:CreateButton({
 MiscTab:CreateSection("Auto Equip Best")
 
 MiscTab:CreateToggle({
-    Name = "⚔️ Auto Equip Best",
+    Name = "Auto Equip Best",
     CurrentValue = false,
     Flag = "AutoEquipBest",
     Callback = function(on)
@@ -1447,7 +1556,7 @@ MiscTab:CreateSlider({
 MiscTab:CreateSection("Auto Mana to SP")
 
 MiscTab:CreateToggle({
-    Name = "💧 Auto Mana to SP",
+    Name = "Auto Mana to SP",
     CurrentValue = false,
     Flag = "AutoManaToSP",
     Callback = function(on)
@@ -1455,10 +1564,21 @@ MiscTab:CreateToggle({
     end
 })
 
+MiscTab:CreateSection("Auto Raid")
+
+MiscTab:CreateToggle({
+    Name = "Auto Raid",
+    CurrentValue = false,
+    Flag = "AutoRaid",
+    Callback = function(on)
+        states.autoRaid = on
+    end
+})
+
 MiscTab:CreateSection("Visual")
 
 MiscTab:CreateToggle({
-    Name = "💡 Full Bright",
+    Name = "Full Bright",
     CurrentValue = false,
     Flag = "FullBright",
     Callback = function(on)
@@ -1481,7 +1601,7 @@ MiscTab:CreateToggle({
 MiscTab:CreateSection("Anti AFK")
 
 MiscTab:CreateToggle({
-    Name = "⏱️ Anti AFK",
+    Name = "Anti AFK",
     CurrentValue = false,
     Flag = "AntiAFK",
     Callback = function(on)
@@ -1496,10 +1616,21 @@ MiscTab:CreateToggle({
     end
 })
 
+MiscTab:CreateSection("Auto Re-Exec")
+
+MiscTab:CreateToggle({
+    Name = "Auto Re-Exec (every 60s)",
+    CurrentValue = false,
+    Flag = "AutoReExec",
+    Callback = function(on)
+        states.autoReExec = on
+    end
+})
+
 MiscTab:CreateSection("Fire Machine")
 
 MiscTab:CreateButton({
-    Name = "🌀 Fire Nearest Machine",
+    Name = "Fire Nearest Machine",
     Callback = function()
         local root = getRoot()
         if not root then return end
@@ -1538,17 +1669,17 @@ MiscTab:CreateButton({
 MiscTab:CreateSection("Server Hop")
 
 MiscTab:CreateButton({
-    Name = "🔀 Server Hop",
+    Name = "Server Hop",
     Callback = function()
         local TS = game:GetService("TeleportService")
-        game:GetService("TeleportService"):Teleport(game.PlaceId, LP)
+        TS:Teleport(game.PlaceId, LP)
     end
 })
 
 MiscTab:CreateSection("Value Spoofs")
 
 MiscTab:CreateToggle({
-    Name = "💥 Damage Multiplier x5",
+    Name = "Damage Multiplier x5",
     CurrentValue = false,
     Flag = "DmgSpoof",
     Callback = function(on)
@@ -1570,7 +1701,7 @@ MiscTab:CreateToggle({
 })
 
 MiscTab:CreateToggle({
-    Name = "🍀 RNG Luck x5",
+    Name = "RNG Luck x5",
     CurrentValue = false,
     Flag = "LuckSpoof",
     Callback = function(on)
@@ -1592,7 +1723,7 @@ MiscTab:CreateToggle({
 })
 
 MiscTab:CreateToggle({
-    Name = "☠️ Kill Multiplier x5",
+    Name = "Kill Multiplier x5",
     CurrentValue = false,
     Flag = "KillSpoof",
     Callback = function(on)
@@ -1614,7 +1745,7 @@ MiscTab:CreateToggle({
 })
 
 MiscTab:CreateToggle({
-    Name = "✨ SP Multiplier x5",
+    Name = "SP Multiplier x5",
     CurrentValue = false,
     Flag = "SPSpoof",
     Callback = function(on)
@@ -1636,7 +1767,7 @@ MiscTab:CreateToggle({
 })
 
 MiscTab:CreateToggle({
-    Name = "🌙 Mana Multiplier x5",
+    Name = "Mana Multiplier x5",
     CurrentValue = false,
     Flag = "ManaSpoof",
     Callback = function(on)
@@ -1657,7 +1788,7 @@ MiscTab:CreateToggle({
     end
 })
 
--- Script loaded notification
+-- Script loaded
 Rayfield:Notify({
     Title = "MeleeRNG Loaded",
     Content = "All features ready",
