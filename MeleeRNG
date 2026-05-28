@@ -2306,14 +2306,30 @@ addThread(task.spawn(function()
             if not boughtThisRound then break end
         end
 
-        if not boughtAny then
-            local candidates = lastCand or upgBuildSortedCandidates()
-            local nextName, nextPrice = "none", math.huge
-            if #candidates > 0 then
-                nextName = candidates[1].name
-                nextPrice = candidates[1].price
+if not boughtAny then
+    local candidates = lastCand or upgBuildSortedCandidates()
+    local nextName, nextPrice = "none", math.huge
+    if #candidates > 0 then
+        nextName = candidates[1].name
+        nextPrice = candidates[1].price
+    end
+
+    -- If all caps hit and nothing left to buy, convert SP to GP
+    if #candidates == 0 and states.autoUpgradeOn then
+        pcall(function()
+            local ls = game.Players.LocalPlayer:FindFirstChild("leaderstats")
+            local spName = string.char(226,156,168,32,83,80)
+            local spStat = ls and ls:FindFirstChild(spName)
+            local sp = spStat and math.floor(spStat.Value) or 0
+            if sp >= 100 then
+                local BuyGP = game:GetService("ReplicatedStorage").Remotes:WaitForChild("BuyGP")
+                BuyGP:InvokeServer(sp)
+                _cachedStats["SP"] = nil
             end
-            upgStatusLbl.Set(string.format("⏳ Next:%s (%d SP) | Have %s | On:%s",
+        end)
+    end
+
+    upgStatusLbl.Set(string.format("⏳ Next:%s (%d SP) | Have %s | On:%s",
                 nextName, nextPrice == math.huge and 0 or math.floor(nextPrice), upgFormatSp(sp),
                 upgFormatAllToggled(candidates)))
             task.wait(UPGRADE_LOOP_IDLE)
@@ -4425,57 +4441,18 @@ end)
 MoveTab:Toggle("💡 Full Bright", "Max ambient light, remove fog", states.fullBright, function(on)
     states.fullBright = on; saveSettings()
 end)
-local equipGui = nil
-local equipLabel = nil
-
-local function createEquipHUD()
-    if equipGui then equipGui:Destroy() end
-    equipGui = Instance.new("ScreenGui", LP.PlayerGui)
-    equipGui.Name = "EquipHUD"
-    equipGui.ResetOnSpawn = false
-    local label = Instance.new("TextLabel", equipGui)
-    label.Size = UDim2.new(0, 200, 0, 30)
-    label.Position = UDim2.new(0, 10, 0, 10)
-    label.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    label.BackgroundTransparency = 0.4
-    label.TextColor3 = Color3.fromRGB(0, 255, 0)
-    label.TextSize = 14
-    label.Font = Enum.Font.GothamBold
-    label.Text = "⚔ Auto Equip: ON"
-    label.BorderSizePixel = 0
-    Instance.new("UICorner", label).CornerRadius = UDim.new(0, 6)
-    return label
-end
-
-local autoEquipBestToggle = MoveTab:Toggle("⚔️ Auto Equip Best", "Remotes.EquipBest:InvokeServer() every 30s while ON — shows HUD label", states.autoEquipBest, function(on)
+local autoEquipBestToggle = MoveTab:Toggle("⚔️ Auto Equip Best", "Remotes.EquipBest:FireServer() every 10s while ON — same as the in-game Equip Best button (Weapons UI)", states.autoEquipBest, function(on)
     states.autoEquipBest = on == true
     saveSettings()
-    if on then
-        equipLabel = createEquipHUD()
-        SLbl.Text = "Auto Equip Best ON"
-    else
-        if equipGui then equipGui:Destroy(); equipGui = nil; equipLabel = nil end
-        SLbl.Text = "Auto Equip Best OFF"
-    end
+    SLbl.Text = on and "Auto Equip Best ON (every 10s)" or "Auto Equip Best OFF"
 end)
 task.defer(function()
     pcall(function()
         if autoEquipBestToggle and autoEquipBestToggle.Set then
             autoEquipBestToggle.Set(states.autoEquipBest)
         end
-        if states.autoEquipBest then
-            equipLabel = createEquipHUD()
-        end
     end)
 end)
-
-addConn(LP.CharacterAdded:Connect(function()
-    if GEN ~= _G.MeleeRNG_Gen then return end
-    if states.autoEquipBest then
-        task.wait(1)
-        equipLabel = createEquipHUD()
-    end
-end))
 
 MoveTab:Section("Actions")
 MoveTab:Button("📋", "Print Position", "Prints XYZ + current area to output", C.accent, function()
@@ -4644,17 +4621,14 @@ end)
 -- Feature loops (same IIFE as UI — shares states / GEN)
 -- --------------------------------------------------------------------------
 
--- ── Auto Equip Best ──
+-- ── Auto Equip Best (WeaponsUI EquipBestBtn → Remotes.EquipBest:FireServer) ──
 addThread(task.spawn(function()
     while true do
         if GEN ~= _G.MeleeRNG_Gen then break end
-        task.wait(30)
+        task.wait(10)
         if not states.autoEquipBest then continue end
         pcall(function()
-            invokeR("EquipBest")
-            if equipLabel and equipLabel.Parent then
-                equipLabel.Text = "⚔ Auto Equip: ON"
-            end
+            fireR("EquipBest")
         end)
     end
 end))
