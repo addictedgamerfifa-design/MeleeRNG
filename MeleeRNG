@@ -2313,6 +2313,15 @@ addThread(task.spawn(function()
                 nextName = candidates[1].name
                 nextPrice = candidates[1].price
             end
+            if #candidates == 0 and states.autoUpgradeOn then
+                pcall(function()
+                    local sp = tonumber(getSP()) or 0
+                    if sp >= 100 then
+                        invokeR("BuyGP", sp)
+                        _cachedStats["SP"] = nil
+                    end
+                end)
+            end
             upgStatusLbl.Set(string.format("⏳ Next:%s (%d SP) | Have %s | On:%s",
                 nextName, nextPrice == math.huge and 0 or math.floor(nextPrice), upgFormatSp(sp),
                 upgFormatAllToggled(candidates)))
