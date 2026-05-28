@@ -2307,29 +2307,27 @@ addThread(task.spawn(function()
         end
 
 if not boughtAny then
-    local candidates = lastCand or upgBuildSortedCandidates()
-    local nextName, nextPrice = "none", math.huge
-    if #candidates > 0 then
-        nextName = candidates[1].name
-        nextPrice = candidates[1].price
-    end
-
-    -- If all caps hit and nothing left to buy, convert SP to GP
-    if #candidates == 0 and states.autoUpgradeOn then
-        pcall(function()
-            local ls = game.Players.LocalPlayer:FindFirstChild("leaderstats")
-            local spName = string.char(226,156,168,32,83,80)
-            local spStat = ls and ls:FindFirstChild(spName)
-            local sp = spStat and math.floor(spStat.Value) or 0
-            if sp >= 100 then
-                local BuyGP = game:GetService("ReplicatedStorage").Remotes:WaitForChild("BuyGP")
-                BuyGP:InvokeServer(sp)
-                _cachedStats["SP"] = nil
+            local candidates = lastCand or upgBuildSortedCandidates()
+            local nextName, nextPrice = "none", math.huge
+            if #candidates > 0 then
+                nextName = candidates[1].name
+                nextPrice = candidates[1].price
             end
-        end)
-    end
-
-    upgStatusLbl.Set(string.format("⏳ Next:%s (%d SP) | Have %s | On:%s",
+            -- If all caps hit and nothing left to buy, convert SP to GP
+            if #candidates == 0 and states.autoUpgradeOn then
+                pcall(function()
+                    local ls = game.Players.LocalPlayer:FindFirstChild("leaderstats")
+                    local spName = string.char(226,156,168,32,83,80)
+                    local spStat = ls and ls:FindFirstChild(spName)
+                    local sp = spStat and math.floor(spStat.Value) or 0
+                    if sp >= 100 then
+                        local BuyGP = game:GetService("ReplicatedStorage").Remotes:WaitForChild("BuyGP")
+                        BuyGP:InvokeServer(sp)
+                        _cachedStats["SP"] = nil
+                    end
+                end)
+            end
+            upgStatusLbl.Set(string.format("⏳ Next:%s (%d SP) | Have %s | On:%s",
                 nextName, nextPrice == math.huge and 0 or math.floor(nextPrice), upgFormatSp(sp),
                 upgFormatAllToggled(candidates)))
             task.wait(UPGRADE_LOOP_IDLE)
