@@ -2306,7 +2306,7 @@ addThread(task.spawn(function()
             if not boughtThisRound then break end
         end
 
-if not boughtAny then
+        if not boughtAny then
             local candidates = lastCand or upgBuildSortedCandidates()
             local nextName, nextPrice = "none", math.huge
             if #candidates > 0 then
